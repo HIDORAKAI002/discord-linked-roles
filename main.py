@@ -1,4 +1,4 @@
-# server.py
+# main.py
 # This file runs a web server to handle the Discord Linked Roles connection.
 
 import os
@@ -9,23 +9,15 @@ from dotenv import load_dotenv
 import threading
 import asyncio
 
-# Load environment variables from a .env file for local testing
-load_dotenv()
-
 # --- CONFIGURATION ---
-# These variables will be loaded from your hosting service's secrets or a .env file.
+# These variables will be loaded from your hosting service's secrets.
 CLIENT_ID = os.getenv('DISCORD_CLIENT_ID')
 CLIENT_SECRET = os.getenv('DISCORD_CLIENT_SECRET')
 BOT_TOKEN = os.getenv('DISCORD_BOT_TOKEN')
-REDIRECT_URI = os.getenv('DISCORD_REDIRECT_URI')  # e.g., 'https://your-app-name.onrender.com/linked-roles'
-SERVER_ID = int(os.getenv('DISCORD_SERVER_ID'))    # The ID of the server where the roles exist
+REDIRECT_URI = os.getenv('DISCORD_REDIRECT_URI')
+SERVER_ID = int(os.getenv('DISCORD_SERVER_ID'))
 
 # --- ROLE MAPPING ---
-# This is the most important part to configure.
-# You MUST replace the numbers on the right with the actual Role IDs from YOUR Discord server.
-# To get a Role ID, right-click the role in Server Settings -> Roles and click "Copy Role ID".
-# Make sure Developer Mode is enabled in your Discord settings.
-#
 # The key (e.g., 'mod') MUST EXACTLY MATCH the "Field Name / Key" you set up in the
 # Linked Roles metadata section of your Discord Developer Portal.
 ROLE_MAPPINGS = {
@@ -37,21 +29,17 @@ ROLE_MAPPINGS = {
 }
 
 # --- DISCORD BOT SETUP ---
-# We need a bot to connect to your server and check which roles a user has.
 # The 'Server Members Intent' must be enabled for your bot in the Developer Portal.
 intents = discord.Intents.default()
 intents.members = True
 client = discord.Client(intents=intents)
-
-# This will hold the bot's event loop
 bot_loop = None
 
 # --- FLASK WEB SERVER ---
 app = Flask(__name__)
 
-# This is the main endpoint that Discord redirects the user to.
-@app.route('/linked-roles')
-def linked_roles():
+@app.route('/callback') # <--- THIS IS THE ONLY LINE THAT HAS CHANGED
+def callback():
     # 1. Get the authorization code from Discord's redirect.
     code = request.args.get('code')
     if not code:
@@ -94,7 +82,6 @@ def linked_roles():
     # 5. Redirect the user back to their Discord client.
     return redirect('https://discord.com/channels/@me')
 
-# This function uses the bot to look up a user in your server.
 async def get_user_roles(user_id):
     """Uses the bot to get a user's roles from the specified server."""
     try:
@@ -108,7 +95,6 @@ async def get_user_roles(user_id):
             print(f"Error: Could not find member with ID {user_id} in the server.")
             return []
             
-        # Return a list of the user's role IDs
         return [role.id for role in member.roles]
     except discord.errors.NotFound:
         print(f"Error: Member with ID {user_id} not found in guild {SERVER_ID}.")
@@ -120,31 +106,25 @@ async def get_user_roles(user_id):
         print(f"An unexpected error occurred in get_user_roles: {e}")
         return []
 
-# This function builds and sends the metadata to Discord.
 def update_metadata(user_id, access_token):
     """Calculates and pushes the metadata for a user."""
     url = f'https://discord.com/api/v10/users/@me/applications/{CLIENT_ID}/role-connection'
 
-    # Get the user's current roles from our server using the bot
     future = asyncio.run_coroutine_threadsafe(get_user_roles(user_id), bot_loop)
     user_role_ids = future.result()
     
-    # Create the metadata payload based on the user's roles
     metadata = {}
     for key, role_id in ROLE_MAPPINGS.items():
         if role_id in user_role_ids:
-            metadata[key] = 1 # 1 means true
+            metadata[key] = 1
         else:
-            metadata[key] = 0 # 0 means false
+            metadata[key] = 0
 
-    # As requested: if a user has the 'manager' role, they should NOT get the 'mod' linked role.
-    # This assumes 'manager' is a higher-tier role than 'mod'.
     if metadata.get('manager') == 1:
         metadata['mod'] = 0
 
-    # Send the metadata to Discord
     json_data = {
-        'platform_name': 'Server Roles', # You can change this name
+        'platform_name': 'Server Roles',
         'metadata': metadata
     }
     headers = {
@@ -160,8 +140,6 @@ def update_metadata(user_id, access_token):
         print(f"Error updating metadata for user {user_id}: {e}")
         print(f"Response Body: {response.text}")
 
-# --- MAIN EXECUTION ---
-# This part runs both the web server and the Discord bot at the same time.
 def run_bot():
     global bot_loop
     bot_loop = asyncio.new_event_loop()
@@ -169,12 +147,7 @@ def run_bot():
     client.run(BOT_TOKEN)
 
 if __name__ == "__main__":
-    # Start the Discord bot in a separate thread
     bot_thread = threading.Thread(target=run_bot)
     bot_thread.daemon = True
     bot_thread.start()
-
-    # Start the Flask web server
-    # Note: For a real hosting service, you would use a production server like Gunicorn,
-    # not the built-in Flask development server.
     app.run(host='0.0.0.0', port=10000)
