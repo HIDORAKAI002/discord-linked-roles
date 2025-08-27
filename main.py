@@ -38,12 +38,23 @@ bot_loop = None
 # --- FLASK WEB SERVER ---
 app = Flask(__name__)
 
-@app.route('/callback') # <--- THIS IS THE ONLY LINE THAT HAS CHANGED
+@app.route('/callback')
 def callback():
+    # --- NEW DEBUG LOGGING ---
+    # We are adding these print statements to see exactly what Discord sends us.
+    print("--- NEW REQUEST RECEIVED ---")
+    print(f"Request URL: {request.url}")
+    print(f"Request Arguments: {request.args}")
+    print(f"Request Headers: {request.headers}")
+    print("--------------------------")
+
     # 1. Get the authorization code from Discord's redirect.
     code = request.args.get('code')
     if not code:
+        print("ERROR: 'code' not found in request arguments.")
         return "Error: No authorization code provided.", 400
+
+    print(f"SUCCESS: Authorization code received: {code}")
 
     # 2. Exchange the code for an access token.
     token_url = 'https://discord.com/api/v10/oauth2/token'
@@ -60,8 +71,10 @@ def callback():
         token_response = requests.post(token_url, data=data, headers=headers)
         token_response.raise_for_status()
         access_token = token_response.json()['access_token']
+        print("SUCCESS: Access token received.")
     except requests.exceptions.RequestException as e:
         print(f"Error exchanging code for token: {e}")
+        print(f"Response Body: {token_response.text}")
         return "Error communicating with Discord API.", 500
 
     # 3. Get the user's Discord ID.
@@ -72,6 +85,7 @@ def callback():
         user_response = requests.get(user_info_url, headers=headers)
         user_response.raise_for_status()
         user_id = user_response.json()['id']
+        print(f"SUCCESS: User ID received: {user_id}")
     except requests.exceptions.RequestException as e:
         print(f"Error getting user info: {e}")
         return "Error getting user info from Discord.", 500
